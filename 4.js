@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         百度网盘加载完成后去除 # 并新开标签页
-// @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  页面完全加载后，如果 URL 存在 #，打开去掉 # 的新标签页并关闭当前标签页
+// @name         百度网盘：自动去除 # 并新标签打开
+// @namespace    https://pan.baidu.com/
+// @version      2.0
+// @description  百度网盘平板播放列表自动去除 # 路由，并在新标签页打开干净 URL
 // @match        https://pan.baidu.com/*
 // @run-at       document-idle
 // @grant        GM_openInTab
@@ -11,64 +11,150 @@
 (function () {
     'use strict';
 
-    // 防止新标签页再次触发脚本，造成死循环
-    const FLAG = 'tm_cleaned=1';
+    /*
+     * ==============================
+     * 配置
+     * ==============================
+     */
 
-    // 如果当前 URL 已经带有处理标记，直接退出
-    if (new URLSearchParams(window.location.search).has(FLAG.split('=')[0])) {
-        console.log('[百度网盘] 已处理过，不再执行');
+    // 新页面打开后，最多等待多久再关闭旧页面
+    const CLOSE_DELAY = 1500;
+
+    // 页面完全加载后再检查
+    const CHECK_DELAY = 1000;
+
+
+    /*
+     * ==============================
+     * 防止死循环
+     * ==============================
+     *
+     * 新页面打开时，在 URL 中增加一个临时标记：
+     *
+     * ?_tm_baidu_clean=1
+     *
+     * 新页面发现这个标记后：
+     *
+     * 1. 不再执行跳转
+     * 2. 立即把地址栏里的这个临时参数删除
+     *
+     * 因此最终地址仍然恢复成原来的干净 URL。
+     */
+
+    const FLAG = '_tm_baidu_clean';
+
+    const url = new URL(window.location.href);
+
+    // 如果这是脚本打开的新页面
+    if (url.searchParams.get(FLAG) === '1') {
+
+        console.log('[百度网盘] 新页面，跳过自动处理');
+
+        // 删除临时参数
+        url.searchParams.delete(FLAG);
+
+        // 保留真正的 URL
+        history.replaceState(
+            null,
+            '',
+            url.pathname + '?' + url.searchParams.toString()
+        );
+
         return;
     }
 
-    // 页面完全加载后执行
+
+    /*
+     * ==============================
+     * 页面完全加载后检查
+     * ==============================
+     */
+
     window.addEventListener('load', function () {
 
-        // 再等待一下，确保百度网盘前端路由已经完成
         setTimeout(function () {
 
             const currentUrl = window.location.href;
 
             console.log('[百度网盘] 页面加载完成');
-            console.log('[百度网盘] 当前 URL:', currentUrl);
+            console.log('[百度网盘] 当前地址：', currentUrl);
 
-            // 没有 #，什么都不做
+
+            /*
+             * 没有 #
+             * 什么都不做
+             */
+
             if (!window.location.hash) {
-                console.log('[百度网盘] 没有 #，不处理');
+
+                console.log('[百度网盘] 没有 #，无需处理');
+
                 return;
             }
 
-            // 去掉 # 以及后面的 Fragment
+
+            /*
+             * ==============================
+             * 获取 # 前面的完整 URL
+             * ==============================
+             */
+
             const hashIndex = currentUrl.indexOf('#');
 
             if (hashIndex === -1) {
                 return;
             }
 
-            let cleanUrl = currentUrl.substring(0, hashIndex);
-
-            // 加入一次性标记，防止新标签页再次执行
-            cleanUrl += (cleanUrl.includes('?') ? '&' : '?') + FLAG;
+            // 完全保留 # 前面的内容
+            const cleanUrl = currentUrl.substring(0, hashIndex);
 
             console.log('[百度网盘] 检测到 #');
-            console.log('[百度网盘] 新标签页:', cleanUrl);
+            console.log('[百度网盘] 原地址：', currentUrl);
+            console.log('[百度网盘] 干净地址：', cleanUrl);
 
-            // 打开新的标签页
-            const newTab = GM_openInTab(cleanUrl, {
+
+            /*
+             * ==============================
+             * 给新页面增加一次性标记
+             * ==============================
+             */
+
+            const newUrl = new URL(cleanUrl);
+
+            newUrl.searchParams.set(FLAG, '1');
+
+
+            /*
+             * ==============================
+             * 打开新标签页
+             * ==============================
+             */
+
+            console.log('[百度网盘] 正在打开新标签页...');
+
+            GM_openInTab(newUrl.toString(), {
                 active: true,
                 insert: true,
                 setParent: true
             });
 
-            // 稍微等待新标签页打开，然后关闭当前标签页
-            setTimeout(function () {
-                try {
-                    window.close();
-                } catch (e) {
-                    console.log('[百度网盘] 当前标签页无法自动关闭:', e);
-                }
-            }, 1000);
 
-        }, 1000);
+            /*
+             * ==============================
+             * 关闭旧页面
+             * ==============================
+             */
+
+            setTimeout(function () {
+
+                console.log('[百度网盘] 尝试关闭旧标签页');
+
+                window.close();
+
+            }, CLOSE_DELAY);
+
+
+        }, CHECK_DELAY);
 
     }, { once: true });
 
